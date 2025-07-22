@@ -1331,3 +1331,4 @@ impl eframe::App for TerminalApp {
     }
 }
 // Development milestone: Basic UI framework added
+// Development milestone: Core terminal functionality implemented
