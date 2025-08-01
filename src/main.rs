@@ -1334,3 +1334,4 @@ impl eframe::App for TerminalApp {
 // Development milestone: Core terminal functionality implemented
 // Development milestone: Input handling and prompt system added
 // Development milestone: System info display and UI components
+// Development milestone: Gemini API integration
