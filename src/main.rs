@@ -1335,3 +1335,4 @@ impl eframe::App for TerminalApp {
 // Development milestone: Input handling and prompt system added
 // Development milestone: System info display and UI components
 // Development milestone: Gemini API integration
+// Development milestone: NLP and gibberish detection
