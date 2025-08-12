@@ -1337,3 +1337,4 @@ impl eframe::App for TerminalApp {
 // Development milestone: Gemini API integration
 // Development milestone: NLP and gibberish detection
 // Development milestone: Auto-suggestions implemented
+// Development milestone: Security features added
