@@ -1338,3 +1338,4 @@ impl eframe::App for TerminalApp {
 // Development milestone: NLP and gibberish detection
 // Development milestone: Auto-suggestions implemented
 // Development milestone: Security features added
+// Development milestone: Async processing with Tokio
