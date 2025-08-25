@@ -1341,3 +1341,4 @@ impl eframe::App for TerminalApp {
 // Development milestone: Async processing with Tokio
 // Development milestone: Error handling and fallbacks
 // Development milestone: Modular architecture
+// Development milestone: Cross-platform compatibility
