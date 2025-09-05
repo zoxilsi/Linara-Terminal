@@ -1344,3 +1344,4 @@ impl eframe::App for TerminalApp {
 // Development milestone: Cross-platform compatibility
 // Development milestone: README documentation
 // Development milestone: Project presentation and docs
+// Development milestone: Final features and polish
