@@ -20,3 +20,6 @@ lock-meta = "Cargo.lock"
 
 /.vscode
 
+# Local environment variables
+.env
+
