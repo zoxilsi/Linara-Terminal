@@ -63,7 +63,7 @@ impl AIAssistant {
 
         // Configure HTTP client for maximum speed
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15)) // Increased timeout for better reliability
+            .timeout(Duration::from_secs(5)) // Even faster timeout
             .pool_max_idle_per_host(20) // More connection pooling
             .pool_idle_timeout(Duration::from_secs(60)) // Longer keep-alive
             .tcp_keepalive(Duration::from_secs(60)) // TCP keepalive
@@ -319,42 +319,6 @@ impl AIAssistant {
         false
     }
 
-    /// Clean unnecessary quotes from command arguments
-    fn clean_command(command: &str) -> String {
-        let mut parts: Vec<String> = Vec::new();
-        let mut in_quotes = false;
-        let mut current = String::new();
-        let mut quote_char = '"';
-
-        for ch in command.chars() {
-            if !in_quotes && (ch == '"' || ch == '\'') {
-                in_quotes = true;
-                quote_char = ch;
-                current.push(ch);
-            } else if in_quotes && ch == quote_char {
-                in_quotes = false;
-                current.push(ch);
-                // Check if the quoted string has spaces
-                let inner = &current[1..current.len()-1];
-                if !inner.contains(' ') && !inner.contains('\t') {
-                    // No spaces, remove quotes
-                    parts.push(inner.to_string());
-                } else {
-                    parts.push(current.clone());
-                }
-                current.clear();
-            } else {
-                current.push(ch);
-            }
-        }
-
-        if !current.is_empty() {
-            parts.push(current);
-        }
-
-        parts.join("")
-    }
-
     #[allow(dead_code)]
     fn is_executable_path(path: &str) -> bool {
         let p = std::path::Path::new(path);
@@ -377,6 +341,40 @@ impl AIAssistant {
         // Direct lookup
         if let Some(cmd) = self.local_commands.get(&input_lower) {
             return Some(cmd.to_string());
+        }
+
+        // Pattern-based matching for remove/delete operations
+        if input_lower.contains("remove folder") || input_lower.contains("delete folder") {
+            // Extract folder name from patterns like "remove folder trial"
+            let words: Vec<&str> = input_lower.split_whitespace().collect();
+            if words.len() >= 3 {
+                let folder_name = words[2..].join(" ");
+                if !folder_name.is_empty() {
+                    return Some(format!("rm -r {}", folder_name));
+                }
+            }
+        }
+
+        if input_lower.contains("remove file") || input_lower.contains("delete file") {
+            // Extract file name from patterns like "remove file trial"
+            let words: Vec<&str> = input_lower.split_whitespace().collect();
+            if words.len() >= 3 {
+                let file_name = words[2..].join(" ");
+                if !file_name.is_empty() {
+                    return Some(format!("rm {}", file_name));
+                }
+            }
+        }
+
+        if input_lower.starts_with("remove ") && !input_lower.contains("folder") && !input_lower.contains("file") {
+            // Handle "remove trial" -> "rm trial"
+            let words: Vec<&str> = input_lower.split_whitespace().collect();
+            if words.len() >= 2 {
+                let target = words[1..].join(" ");
+                if !target.is_empty() {
+                    return Some(format!("rm {}", target));
+                }
+            }
         }
 
         // Fuzzy matching for common variations
@@ -404,74 +402,8 @@ impl AIAssistant {
             "date" | "time" | "what time is it" => Some("date".to_string()),
             "calendar" | "cal" | "show calendar" => Some("cal".to_string()),
             "help" | "commands" | "?" => Some("help".to_string()),
-            _ => {
-                // Handle patterns
-                if input_lower.starts_with("create folder ") {
-                    let name = input_lower.trim_start_matches("create folder ").trim();
-                    if !name.is_empty() {
-                        return Some(format!("mkdir {}", name));
-                    }
-                }
-                if input_lower.starts_with("create file ") {
-                    let name = input_lower.trim_start_matches("create file ").trim();
-                    if !name.is_empty() {
-                        return Some(format!("touch {}", name));
-                    }
-                }
-                if input_lower.contains("open") && input_lower.contains("in vs code") {
-                    if let Some(folder) = Self::extract_folder_from_open(input_lower.as_str(), "vs code") {
-                        return Some(format!("code {}", folder));
-                    } else {
-                        return Some("code .".to_string());
-                    }
-                }
-                if input_lower.contains("top 10 processes") && input_lower.contains("cpu") {
-                    return Some("ps aux --sort=-%cpu | head -11".to_string());
-                }
-                if input_lower.starts_with("delete folder ") {
-                    let name = input_lower.trim_start_matches("delete folder ").trim();
-                    if !name.is_empty() {
-                        return Some(format!("rm -r {}", name));
-                    }
-                }
-                if input_lower.starts_with("remove file ") {
-                    let name = input_lower.trim_start_matches("remove file ").trim();
-                    if !name.is_empty() {
-                        return Some(format!("rm {}", name));
-                    }
-                }
-                if input_lower.starts_with("open ") && input_lower.contains(" in cursor") {
-                    let folder = input_lower.trim_start_matches("open ").split(" in cursor").next().unwrap_or("").trim();
-                    if !folder.is_empty() {
-                        return Some(format!("cursor {}", folder));
-                    }
-                }
-                if input_lower.starts_with("open ") && input_lower.contains(" in vscode") {
-                    let folder = input_lower.trim_start_matches("open ").split(" in vscode").next().unwrap_or("").trim();
-                    if !folder.is_empty() {
-                        return Some(format!("code {}", folder));
-                    }
-                }
-                if input_lower.contains("open in vs code") {
-                    return Some("code .".to_string());
-                }
-                None
-            },
+            _ => None,
         }
-    }
-
-    fn extract_folder_from_open(input: &str, editor: &str) -> Option<String> {
-        // Pattern: "open [folder] in [editor]"
-        if let Some(start) = input.find("open ") {
-            let after_open = &input[start + 5..];
-            if let Some(end) = after_open.find(&format!(" in {}", editor)) {
-                let folder = after_open[..end].trim();
-                if !folder.is_empty() {
-                    return Some(folder.to_string());
-                }
-            }
-        }
-        None
     }
 
     pub async fn generate_command(&self, natural_input: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -490,30 +422,28 @@ impl AIAssistant {
             return Ok(cached_command);
         }
 
-        // Optimized shorter prompt for faster processing
+        // Ultra-clear prompt with direct pattern matching for accurate command generation
         let prompt = format!(
-            "Convert natural language to Linux command. Respond ONLY with command, no explanation.
+            "Convert natural language to Linux command. Return ONLY the command.
 
-Rules:
-- Gibberish/nonsense → I_DONT_UNDERSTAND
-- Questions without context → I_DONT_UNDERSTAND
-- Valid requests → command only
-- For filenames with spaces, use quotes: \"file name\" or 'file name'
+Pattern matching rules:
+- \"remove folder NAME\" → \"rm -r NAME\"
+- \"delete folder NAME\" → \"rm -r NAME\"
+- \"remove file NAME\" → \"rm NAME\"
+- \"delete file NAME\" → \"rm NAME\"
 
-Examples:
-list files → ls
-create folder test → mkdir test
-remove file → rm file
-delete folder → rm -r folder
-remove my folder → rm -r \"my folder\"
-delete test file → rm \"test file\"
-delete old folder → rm -r \"old folder\"
-open folder in editor → cursor .
-show the top 10 processes by CPU usage → ps aux --sort=-%cpu | head -11
-list all files larger than 100MB in home directory → find ~ -type f -size +100M -exec ls -lh {{}} + | sort -k5 -hr
+Direct examples:
+Input: remove folder trial
+Output: rm -r trial
+
+Input: delete folder test
+Output: rm -r test
+
+Input: remove file hello.txt
+Output: rm hello.txt
 
 Input: {}
-Command:",
+Output:",
             natural_input
         );
 
@@ -523,14 +453,14 @@ Command:",
                 role: "user".to_string(),
                 content: prompt,
             }],
-            max_tokens: Some(20),
+            max_tokens: Some(100),
             temperature: Some(0.1), // Low temperature for consistent command generation
         };
 
         let api_key = get_openrouter_api_key().map_err(|e| e)?;
         let url = OPENROUTER_URL.to_string();
 
-        // Increased timeout for better reliability
+        // Increased timeout for better accuracy
         let response = timeout(Duration::from_secs(10),
             self.client
                 .post(&url)
@@ -549,12 +479,9 @@ Command:",
         let openrouter_response: OpenRouterResponse = response.json().await?;
 
         // Extract first choice text
-        let mut command = if let Some(choice) = openrouter_response.choices.first() {
+        let command = if let Some(choice) = openrouter_response.choices.first() {
             choice.message.content.trim().to_string()
         } else { String::new() };
-
-        // Clean unnecessary quotes
-        command = Self::clean_command(&command);
 
         // Clean up the response - remove markdown formatting if present
         let command = command.trim_start_matches("```bash").trim_start_matches("```").trim_end_matches("```").trim().to_string();
@@ -618,6 +545,8 @@ IMPORTANT RULES:
 - Do NOT return the same input as output
 - Do NOT try to interpret incoherent phrases as commands
 - Respond ONLY with the command itself, no explanations, no markdown, no quotes
+- ONLY use quotes for filenames/folders that contain spaces
+- Do NOT use quotes for simple names without spaces
 
 SPECIAL HANDLING FOR EDITORS/IDEs:
 - \"open this folder in cursor\" → \"cursor .\"
@@ -636,12 +565,15 @@ Examples:
 - Input: \"create folder test\" → Output: \"mkdir test\"
 - Input: \"remove hello\" → Output: \"rm hello\"
 - Input: \"remove hello folder\" → Output: \"rm -r hello\"
+- Input: \"remove folder trial\" → Output: \"rm -r trial\"
+- Input: \"remove the file trial\" → Output: \"rm trial\"
+- Input: \"remove folder trial/\" → Output: \"rm -r trial\"
 - Input: \"delete test file\" → Output: \"rm test\"
 - Input: \"delete test directory\" → Output: \"rm -r test\"
-- Input: \"remove my folder\" → Output: \"rm -r \"my folder\"\"
-- Input: \"delete old file\" → Output: \"rm \"old file\"\"
-- Input: \"remove SEM 3 folder\" → Output: \"rm -r \"SEM 3\"\"
-- Input: \"delete my documents\" → Output: \"rm -r \"my documents\"\"
+- Input: \"remove my folder\" → Output: \"rm -r \\\"my folder\\\"\"
+- Input: \"delete old file\" → Output: \"rm \\\"old file\\\"\"
+- Input: \"remove SEM 3 folder\" → Output: \"rm -r \\\"SEM 3\\\"\"
+- Input: \"delete my documents\" → Output: \"rm -r \\\"my documents\\\"\"
 - Input: \"open this folder in cursor\" → Output: \"cursor .\"
 - Input: \"open current directory in vscode\" → Output: \"code .\"
 - Input: \"open this folder in gui\" → Output: \"xdg-open .\"
@@ -663,14 +595,14 @@ Command:",
                 role: "user".to_string(),
                 content: prompt,
             }],
-            max_tokens: Some(20),
+            max_tokens: Some(100),
             temperature: Some(0.1), // Low temperature for consistent command generation
         };
 
         let api_key = get_openrouter_api_key().map_err(|e| e)?;
         let url = OPENROUTER_URL.to_string();
 
-        // Increased timeout for better reliability
+        // Increased timeout for better accuracy
         let response = timeout(Duration::from_secs(10),
             client
                 .post(&url)
@@ -694,10 +626,7 @@ Command:",
             command = choice.message.content.trim().to_string();
         }
         // Clean up the response - remove markdown formatting if present
-        let mut command = command.trim_start_matches("```bash").trim_start_matches("```").trim_end_matches("```").trim().to_string();
-
-        // Clean unnecessary quotes
-        command = Self::clean_command(&command);
+        let command = command.trim_start_matches("```bash").trim_start_matches("```").trim_end_matches("```").trim();
 
         // Check if AI responded that it doesn't understand
         if command == "I_DONT_UNDERSTAND" {
