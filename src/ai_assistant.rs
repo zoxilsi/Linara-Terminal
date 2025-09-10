@@ -63,7 +63,7 @@ impl AIAssistant {
 
         // Configure HTTP client for maximum speed
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5)) // Even faster timeout
+            .timeout(Duration::from_secs(15)) // Increased timeout for better reliability
             .pool_max_idle_per_host(20) // More connection pooling
             .pool_idle_timeout(Duration::from_secs(60)) // Longer keep-alive
             .tcp_keepalive(Duration::from_secs(60)) // TCP keepalive
@@ -319,6 +319,42 @@ impl AIAssistant {
         false
     }
 
+    /// Clean unnecessary quotes from command arguments
+    fn clean_command(command: &str) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        let mut in_quotes = false;
+        let mut current = String::new();
+        let mut quote_char = '"';
+
+        for ch in command.chars() {
+            if !in_quotes && (ch == '"' || ch == '\'') {
+                in_quotes = true;
+                quote_char = ch;
+                current.push(ch);
+            } else if in_quotes && ch == quote_char {
+                in_quotes = false;
+                current.push(ch);
+                // Check if the quoted string has spaces
+                let inner = &current[1..current.len()-1];
+                if !inner.contains(' ') && !inner.contains('\t') {
+                    // No spaces, remove quotes
+                    parts.push(inner.to_string());
+                } else {
+                    parts.push(current.clone());
+                }
+                current.clear();
+            } else {
+                current.push(ch);
+            }
+        }
+
+        if !current.is_empty() {
+            parts.push(current);
+        }
+
+        parts.join("")
+    }
+
     #[allow(dead_code)]
     fn is_executable_path(path: &str) -> bool {
         let p = std::path::Path::new(path);
@@ -368,8 +404,74 @@ impl AIAssistant {
             "date" | "time" | "what time is it" => Some("date".to_string()),
             "calendar" | "cal" | "show calendar" => Some("cal".to_string()),
             "help" | "commands" | "?" => Some("help".to_string()),
-            _ => None,
+            _ => {
+                // Handle patterns
+                if input_lower.starts_with("create folder ") {
+                    let name = input_lower.trim_start_matches("create folder ").trim();
+                    if !name.is_empty() {
+                        return Some(format!("mkdir {}", name));
+                    }
+                }
+                if input_lower.starts_with("create file ") {
+                    let name = input_lower.trim_start_matches("create file ").trim();
+                    if !name.is_empty() {
+                        return Some(format!("touch {}", name));
+                    }
+                }
+                if input_lower.contains("open") && input_lower.contains("in vs code") {
+                    if let Some(folder) = Self::extract_folder_from_open(input_lower.as_str(), "vs code") {
+                        return Some(format!("code {}", folder));
+                    } else {
+                        return Some("code .".to_string());
+                    }
+                }
+                if input_lower.contains("top 10 processes") && input_lower.contains("cpu") {
+                    return Some("ps aux --sort=-%cpu | head -11".to_string());
+                }
+                if input_lower.starts_with("delete folder ") {
+                    let name = input_lower.trim_start_matches("delete folder ").trim();
+                    if !name.is_empty() {
+                        return Some(format!("rm -r {}", name));
+                    }
+                }
+                if input_lower.starts_with("remove file ") {
+                    let name = input_lower.trim_start_matches("remove file ").trim();
+                    if !name.is_empty() {
+                        return Some(format!("rm {}", name));
+                    }
+                }
+                if input_lower.starts_with("open ") && input_lower.contains(" in cursor") {
+                    let folder = input_lower.trim_start_matches("open ").split(" in cursor").next().unwrap_or("").trim();
+                    if !folder.is_empty() {
+                        return Some(format!("cursor {}", folder));
+                    }
+                }
+                if input_lower.starts_with("open ") && input_lower.contains(" in vscode") {
+                    let folder = input_lower.trim_start_matches("open ").split(" in vscode").next().unwrap_or("").trim();
+                    if !folder.is_empty() {
+                        return Some(format!("code {}", folder));
+                    }
+                }
+                if input_lower.contains("open in vs code") {
+                    return Some("code .".to_string());
+                }
+                None
+            },
         }
+    }
+
+    fn extract_folder_from_open(input: &str, editor: &str) -> Option<String> {
+        // Pattern: "open [folder] in [editor]"
+        if let Some(start) = input.find("open ") {
+            let after_open = &input[start + 5..];
+            if let Some(end) = after_open.find(&format!(" in {}", editor)) {
+                let folder = after_open[..end].trim();
+                if !folder.is_empty() {
+                    return Some(folder.to_string());
+                }
+            }
+        }
+        None
     }
 
     pub async fn generate_command(&self, natural_input: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -407,6 +509,8 @@ remove my folder → rm -r \"my folder\"
 delete test file → rm \"test file\"
 delete old folder → rm -r \"old folder\"
 open folder in editor → cursor .
+show the top 10 processes by CPU usage → ps aux --sort=-%cpu | head -11
+list all files larger than 100MB in home directory → find ~ -type f -size +100M -exec ls -lh {{}} + | sort -k5 -hr
 
 Input: {}
 Command:",
@@ -426,8 +530,8 @@ Command:",
         let api_key = get_openrouter_api_key().map_err(|e| e)?;
         let url = OPENROUTER_URL.to_string();
 
-        // Ultra-fast timeout for instant feel
-        let response = timeout(Duration::from_secs(3),
+        // Increased timeout for better reliability
+        let response = timeout(Duration::from_secs(10),
             self.client
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", api_key))
@@ -445,9 +549,12 @@ Command:",
         let openrouter_response: OpenRouterResponse = response.json().await?;
 
         // Extract first choice text
-        let command = if let Some(choice) = openrouter_response.choices.first() {
+        let mut command = if let Some(choice) = openrouter_response.choices.first() {
             choice.message.content.trim().to_string()
         } else { String::new() };
+
+        // Clean unnecessary quotes
+        command = Self::clean_command(&command);
 
         // Clean up the response - remove markdown formatting if present
         let command = command.trim_start_matches("```bash").trim_start_matches("```").trim_end_matches("```").trim().to_string();
@@ -563,8 +670,8 @@ Command:",
         let api_key = get_openrouter_api_key().map_err(|e| e)?;
         let url = OPENROUTER_URL.to_string();
 
-        // Reduced timeout for better UX
-        let response = timeout(Duration::from_secs(3),
+        // Increased timeout for better reliability
+        let response = timeout(Duration::from_secs(10),
             client
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", api_key))
@@ -587,7 +694,10 @@ Command:",
             command = choice.message.content.trim().to_string();
         }
         // Clean up the response - remove markdown formatting if present
-        let command = command.trim_start_matches("```bash").trim_start_matches("```").trim_end_matches("```").trim();
+        let mut command = command.trim_start_matches("```bash").trim_start_matches("```").trim_end_matches("```").trim().to_string();
+
+        // Clean unnecessary quotes
+        command = Self::clean_command(&command);
 
         // Check if AI responded that it doesn't understand
         if command == "I_DONT_UNDERSTAND" {

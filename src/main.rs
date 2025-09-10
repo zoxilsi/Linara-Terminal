@@ -818,6 +818,41 @@ impl TerminalApp {
     }
 
     async fn execute_natural_language(&mut self, natural_input: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        // First check for instant commands
+        if let Some(cmd) = AIAssistant::get_instant_command(natural_input) {
+            self.add_line(&format!("⚡ Processing..."), false, false);
+            self.add_line(&format!("✅ {}", cmd), false, false);
+            // Execute the command
+            let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+            if parts.is_empty() {
+                self.add_line("❌ Empty command", false, false);
+                self.show_prompt();
+                self.input_buffer.clear();
+                self.cursor_pos = 0;
+                return Ok(false);
+            }
+            let (name, args) = (parts[0], &parts[1..]);
+            let output = Command::new(name).args(args).current_dir(&self.current_dir).output();
+            match output {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    for line in stdout.lines() { if !line.is_empty() { self.add_line(line, false, false); } }
+                    for line in stderr.lines() { if !line.is_empty() { self.add_line(&format!("ERROR: {}", line), false, false); } }
+                    if out.status.success() && stdout.trim().is_empty() && stderr.trim().is_empty() {
+                        self.add_line("✅ Command executed successfully", false, false);
+                    }
+                }
+                Err(e) => {
+                    self.add_line(&format!("❌ Failed to execute '{}': {}", name, e), false, false);
+                }
+            }
+            self.show_prompt();
+            self.input_buffer.clear();
+            self.cursor_pos = 0;
+            return Ok(true);
+        }
+
         // Ask AI to convert NL to a command
         let cmd = match self.ai.generate_command(natural_input).await {
             Ok(c) => c,
@@ -840,7 +875,8 @@ impl TerminalApp {
             }
         };
 
-        self.add_line(&format!("🔧 AI suggests: {}", &cmd), false, false);
+        self.add_line(&format!("⚡ Processing..."), false, false);
+        self.add_line(&format!("✅ {}", &cmd), false, false);
         // Execute suggested command
         let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
         if parts.is_empty() {
